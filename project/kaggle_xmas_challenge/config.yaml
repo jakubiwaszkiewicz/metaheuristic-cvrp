@@ -1,0 +1,23 @@
+params:
+  F_pos: 0.7
+  F_ang: 0.2
+  F_lat: 0.5
+  F_rot: 0.15
+  temp_exponent: 0.7
+  num_cell: [9, 14]
+  a: 0.8744896974945239
+  b: 0.7499641699190263
+  Tmax: 1000
+  Tmin: 1
+  nsteps: 1000
+  iterations_per_temperature: 100
+  cooling: 'linear'
+  alpha: 0.99
+  position_delta: 0.002
+  angle_delta: 1.
+  angle_delta2: 1.
+  delta_t: 0.002
+  random_state: 42
+  log_freq: 5000
+  append_x: False
+  append_y: False
