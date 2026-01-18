@@ -7,9 +7,9 @@ params:
   num_cell: [9, 14]
   a: 0.8744896974945239
   b: 0.7499641699190263
-  Tmax: 1000
+  Tmax: 100
   Tmin: 1
-  nsteps: 1000
+  nsteps: 100
   iterations_per_temperature: 100
   cooling: 'linear'
   alpha: 0.99
