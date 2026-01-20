@@ -18,7 +18,13 @@ import time
 from collections import defaultdict
 import math
 
-FUNC_STATS = defaultdict(lambda: {"time": 0.0, "calls": 0})
+def empty_stat():
+    return {"time": 0.0, "calls": 0}
+
+FUNC_STATS = defaultdict(empty_stat)
+
+timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
 
 def profile(func):
     def wrapper(*args, **kwargs):
@@ -221,19 +227,30 @@ class SimulatedAnnealing:
 
     @profile
     def translate(self, primitive_trees, a, b, num_cell):
-        lattice_trees = []
-        cells_width = num_cell[0]
-        cells_height = num_cell[1]
+        cells_width, cells_height = num_cell
+
+        # precompute offsets
+        offset_x = [Decimal(width * a) for width in range(cells_width)]
+        offset_y = [Decimal(height * b) for height in range(cells_height)]
+
+        n = len(primitive_trees) * cells_width * cells_height
+        lattice_trees = [None] * n  # preallocate
+
+        idx = 0
         for tree in primitive_trees:
-            for width_cell in range(cells_width):
-                for height_cell in range(cells_height):
-                    lattice_trees.append(
-                        ChristmasTree(
-                            center_x=tree.center_x + Decimal(width_cell * a),
-                            center_y=tree.center_y + Decimal(height_cell * b),
-                            angle=tree.angle,
-                        )
+            base_x = tree.center_x
+            base_y = tree.center_y
+            angle = tree.angle
+
+            for dx in offset_x:
+                for dy in offset_y:
+                    lattice_trees[idx] = ChristmasTree(
+                        center_x=base_x + dx,
+                        center_y=base_y + dy,
+                        angle=angle,
                     )
+                    idx += 1
+
         return lattice_trees
 
     @profile
@@ -280,20 +297,23 @@ class SimulatedAnnealing:
                 if perturb_tree_probability < move_probability:
                     tree_probability = random.randint(0,1)
                     old_params = self.perturb_tree(primitive_trees[tree_probability], temperature)
-                    if self.has_overlap(self.translate(primitive_trees, a, b, self.num_cell)):
+                    lattice_trees = self.translate(primitive_trees, a, b, self.num_cell)
+                    if self.has_overlap(lattice_trees):
                         has_overlap_in_iter = True
                         no_of_rejections += 1
                         primitive_trees[tree_probability].set_params(*old_params)
                 elif perturb_translations_probability < move_probability:
                     a, b, old_a, old_b = self.perturb_translations(a, b, temperature)
-                    if self.has_overlap(self.translate(primitive_trees, a, b, self.num_cell)):
+                    lattice_trees = self.translate(primitive_trees, a, b, self.num_cell)
+                    if self.has_overlap(lattice_trees):
                         has_overlap_in_iter = True
                         no_of_rejections += 1
                         a = old_a
                         b = old_b
                 else:
                     primitive_trees, old_angles = self.rotate_all(primitive_trees)
-                    if self.has_overlap(self.translate(primitive_trees, a, b, self.num_cell)):
+                    lattice_trees = self.translate(primitive_trees, a, b, self.num_cell)
+                    if self.has_overlap(lattice_trees):
                         has_overlap_in_iter = True
                         no_of_rejections += 1
                         for i, tree in enumerate(primitive_trees):
@@ -301,9 +321,7 @@ class SimulatedAnnealing:
                             tree.set_params(x, y, old_angles[i])
 
                 if not has_overlap_in_iter:
-                    lattice_trees = self.translate(primitive_trees, a, b, self.num_cell)
                     new_score = self.calculate_score(lattice_trees)
-
                     acceptance_probability = self._acceptance_probability(current_score, new_score, temperature)
                     acceptance = acceptance_probability > random.random()
 
@@ -326,11 +344,14 @@ class SimulatedAnnealing:
 
     @profile
     def save_score(self, temperature, score):
-        dir_name = Path("all_scores")
+        dir_name = Path("all_scores") / timestamp
         dir_name.mkdir(parents=True, exist_ok=True)
+
         save_path = dir_name / f"scores_[{self.num_cell[0]}_{self.num_cell[1]}].csv"
+
         with open(save_path, "a") as f:
             f.write(f"{temperature},{score}\n")
+
 
 @profile
 def get_tree_list_side_length(tree_list: list[ChristmasTree]) -> Decimal:
@@ -351,7 +372,12 @@ def run_sa_for_cells(args):
     config_local["num_cell"] = [i, j]
     sa = SimulatedAnnealing(initial_trees, **config_local)
     trees = sa.solve()
-    return trees
+    return trees, FUNC_STATS
+
+def merge_stats(global_stats, worker_stats):
+    for name, stat in worker_stats.items():
+        global_stats[name]["time"] += stat["time"]
+        global_stats[name]["calls"] += stat["calls"]
 
 def evaluate_and_store_best(tree_list):
     N = len(tree_list)
@@ -381,7 +407,7 @@ if __name__ == '__main__':
     with open("config.yaml", "r") as file_obj:
         config = yaml.safe_load(file_obj)
 
-    max_cells = 10
+    max_cells = 5
     cell_combinations = [
         (i, j)
         for i in range(1, max_cells + 1)
@@ -394,8 +420,9 @@ if __name__ == '__main__':
 
     if multicore:
         with concurrent.futures.ProcessPoolExecutor() as executor:
-            for trees in tqdm(executor.map(run_sa_for_cells, args_list), total=len(cell_combinations)):
+            for trees, worker_stats in tqdm(executor.map(run_sa_for_cells, args_list), total=len(cell_combinations)):
                 evaluate_and_store_best(trees)
+                merge_stats(FUNC_STATS, worker_stats)
     else:
         for cell_combination in tqdm(cell_combinations, total=len(cell_combinations)):
             i, j = cell_combination
